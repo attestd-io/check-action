@@ -1,0 +1,17 @@
+{
+  "name": "attestd-check-action",
+  "version": "1.0.0",
+  "description": "GitHub Action — check a software dependency against the Attestd security risk API",
+  "main": "src/index.js",
+  "scripts": {
+    "build": "ncc build src/index.js -o dist --license licenses.txt",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@actions/core": "1.11.1"
+  },
+  "devDependencies": {
+    "@vercel/ncc": "^0.38.3"
+  },
+  "license": "MIT"
+}

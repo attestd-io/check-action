@@ -1,0 +1,42 @@
+name: "Attestd Dependency Check"
+description: "Check a software dependency against the Attestd security risk API. Fails the workflow if the risk state meets the configured threshold."
+author: "Attestd"
+
+branding:
+  icon: shield
+  color: red
+
+inputs:
+  api_key:
+    description: "Attestd API key (starts with atst_). Store as a repository secret."
+    required: true
+  product:
+    description: "Product slug to check (e.g. nginx, postgresql, openssh). See https://attestd.io/docs/products for the full list and version format notes."
+    required: true
+  version:
+    description: "Version string to check (e.g. 1.20.0, 9.2p1, 2.17.1)."
+    required: true
+  fail_on:
+    description: "Minimum risk state that fails the step. Options: critical, high, elevated, any, never. Default: high."
+    required: false
+    default: "high"
+  base_url:
+    description: "Attestd API base URL. Do not override unless testing against a local instance."
+    required: false
+    default: "https://api.attestd.io"
+
+outputs:
+  risk_state:
+    description: "Risk state returned by Attestd: critical, high, elevated, low, or none."
+  actively_exploited:
+    description: "true if the version is on the CISA KEV list, false otherwise."
+  fixed_version:
+    description: "Earliest version that resolves all known CVEs, or empty string if none."
+  cve_ids:
+    description: "Space-separated list of CVE IDs included in this assessment."
+  supported:
+    description: "true if the product is in Attestd coverage. false means no data is available — not that the product is safe."
+
+runs:
+  using: "node20"
+  main: "dist/index.js"
