@@ -1,5 +1,5 @@
 name: "Attestd Dependency Check"
-description: "Check a software dependency against the Attestd security risk API. Fails the workflow if the risk state meets the configured threshold."
+description: "Check a dependency against the Attestd security risk API and fail the workflow if the risk state meets a configured threshold."
 author: "Attestd"
 
 branding:
