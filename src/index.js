@@ -66,6 +66,17 @@ async function run() {
     // Mask the key so it never appears in step logs
     core.setSecret(apiKey);
 
+    // Warn if the API key will be sent to a non-standard host.
+    // This guards against misconfigured or attacker-controlled base_url values
+    // that would cause the Bearer token to be sent to an unexpected destination.
+    const parsedBase = new URL(baseUrl);
+    if (parsedBase.hostname !== "api.attestd.io") {
+      core.warning(
+        `Non-standard base_url hostname: "${parsedBase.hostname}". ` +
+          `Your API key will be sent to this host. Verify this is intentional.`
+      );
+    }
+
     const url = new URL("/v1/check", baseUrl);
     url.searchParams.set("product", product);
     url.searchParams.set("version", version);
@@ -82,6 +93,7 @@ async function run() {
             "User-Agent": "attestd-check-action/1",
             Accept: "application/json",
           },
+          signal: AbortSignal.timeout(10_000),
         },
         3
       );
