@@ -4,6 +4,7 @@
   "description": "GitHub Action — check a software dependency against the Attestd security risk API",
   "main": "src/index.js",
   "scripts": {
+    "test": "vitest run",
     "build": "ncc build src/index.js -o dist --license licenses.txt",
     "prepare": "npm run build"
   },
@@ -11,7 +12,8 @@
     "@actions/core": "1.11.1"
   },
   "devDependencies": {
-    "@vercel/ncc": "^0.38.3"
+    "@vercel/ncc": "^0.38.3",
+    "vitest": "^3.2.4"
   },
   "license": "MIT"
 }
