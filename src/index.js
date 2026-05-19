@@ -1,7 +1,5 @@
 const core = require("@actions/core");
-
-// Risk state severity order — higher number = more severe
-const RISK_ORDER = { none: 0, low: 1, elevated: 2, high: 3, critical: 4 };
+const { RISK_ORDER, shouldFail } = require("./lib");
 
 const RISK_EMOJI = {
   none: "✅",
@@ -9,15 +7,6 @@ const RISK_EMOJI = {
   elevated: "🟠",
   high: "🔴",
   critical: "🚨",
-};
-
-// Maps the fail_on input to the lowest risk_state that triggers failure
-const FAIL_ON_THRESHOLD = {
-  critical: "critical",
-  high: "high",
-  elevated: "elevated",
-  any: "low",
-  never: null,
 };
 
 async function fetchWithRetry(url, options, maxRetries = 3) {
@@ -40,18 +29,6 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
     }
   }
   throw lastError;
-}
-
-function shouldFail(riskState, failOn) {
-  const threshold = FAIL_ON_THRESHOLD[failOn];
-  if (threshold === null) return false;
-  if (threshold === undefined) {
-    core.warning(
-      `Unknown fail_on value: "${failOn}". Defaulting to "high".`
-    );
-    return RISK_ORDER[riskState] >= RISK_ORDER["high"];
-  }
-  return RISK_ORDER[riskState] >= RISK_ORDER[threshold];
 }
 
 async function run() {
@@ -188,7 +165,7 @@ async function run() {
       .write();
 
     // Determine pass/fail
-    if (shouldFail(risk_state, failOn)) {
+    if (shouldFail(risk_state, failOn, core)) {
       let message = `${product} ${version} has risk state "${risk_state}"`;
       if (actively_exploited) {
         message += " and is actively exploited in the wild (CISA KEV)";

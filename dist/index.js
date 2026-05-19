@@ -25643,6 +25643,40 @@ module.exports = {
 
 /***/ }),
 
+/***/ 1482:
+/***/ ((module) => {
+
+// Risk state severity order — higher number = more severe
+const RISK_ORDER = { none: 0, low: 1, elevated: 2, high: 3, critical: 4 };
+
+// Maps the fail_on input to the lowest risk_state that triggers failure
+const FAIL_ON_THRESHOLD = {
+  critical: "critical",
+  high: "high",
+  elevated: "elevated",
+  any: "low",
+  never: null,
+};
+
+function shouldFail(riskState, failOn, logger) {
+  const threshold = FAIL_ON_THRESHOLD[failOn];
+  if (threshold === null) return false;
+  if (threshold === undefined) {
+    if (logger?.warning) {
+      logger.warning(
+        `Unknown fail_on value: "${failOn}". Defaulting to "high".`
+      );
+    }
+    return RISK_ORDER[riskState] >= RISK_ORDER["high"];
+  }
+  return RISK_ORDER[riskState] >= RISK_ORDER[threshold];
+}
+
+module.exports = { RISK_ORDER, FAIL_ON_THRESHOLD, shouldFail };
+
+
+/***/ }),
+
 /***/ 2613:
 /***/ ((module) => {
 
@@ -27556,9 +27590,7 @@ module.exports = parseParams
 /************************************************************************/
 var __webpack_exports__ = {};
 const core = __nccwpck_require__(7484);
-
-// Risk state severity order — higher number = more severe
-const RISK_ORDER = { none: 0, low: 1, elevated: 2, high: 3, critical: 4 };
+const { RISK_ORDER, shouldFail } = __nccwpck_require__(1482);
 
 const RISK_EMOJI = {
   none: "✅",
@@ -27566,15 +27598,6 @@ const RISK_EMOJI = {
   elevated: "🟠",
   high: "🔴",
   critical: "🚨",
-};
-
-// Maps the fail_on input to the lowest risk_state that triggers failure
-const FAIL_ON_THRESHOLD = {
-  critical: "critical",
-  high: "high",
-  elevated: "elevated",
-  any: "low",
-  never: null,
 };
 
 async function fetchWithRetry(url, options, maxRetries = 3) {
@@ -27599,18 +27622,6 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
   throw lastError;
 }
 
-function shouldFail(riskState, failOn) {
-  const threshold = FAIL_ON_THRESHOLD[failOn];
-  if (threshold === null) return false;
-  if (threshold === undefined) {
-    core.warning(
-      `Unknown fail_on value: "${failOn}". Defaulting to "high".`
-    );
-    return RISK_ORDER[riskState] >= RISK_ORDER["high"];
-  }
-  return RISK_ORDER[riskState] >= RISK_ORDER[threshold];
-}
-
 async function run() {
   try {
     const apiKey = core.getInput("api_key", { required: true });
@@ -27622,6 +27633,17 @@ async function run() {
 
     // Mask the key so it never appears in step logs
     core.setSecret(apiKey);
+
+    // Warn if the API key will be sent to a non-standard host.
+    // This guards against misconfigured or attacker-controlled base_url values
+    // that would cause the Bearer token to be sent to an unexpected destination.
+    const parsedBase = new URL(baseUrl);
+    if (parsedBase.hostname !== "api.attestd.io") {
+      core.warning(
+        `Non-standard base_url hostname: "${parsedBase.hostname}". ` +
+          `Your API key will be sent to this host. Verify this is intentional.`
+      );
+    }
 
     const url = new URL("/v1/check", baseUrl);
     url.searchParams.set("product", product);
@@ -27639,6 +27661,7 @@ async function run() {
             "User-Agent": "attestd-check-action/1",
             Accept: "application/json",
           },
+          signal: AbortSignal.timeout(10_000),
         },
         3
       );
@@ -27733,7 +27756,7 @@ async function run() {
       .write();
 
     // Determine pass/fail
-    if (shouldFail(risk_state, failOn)) {
+    if (shouldFail(risk_state, failOn, core)) {
       let message = `${product} ${version} has risk state "${risk_state}"`;
       if (actively_exploited) {
         message += " and is actively exploited in the wild (CISA KEV)";
