@@ -1,6 +1,6 @@
 {
   "name": "attestd-check-action",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "GitHub Action — check a software dependency against the Attestd security risk API",
   "main": "src/index.js",
   "scripts": {
