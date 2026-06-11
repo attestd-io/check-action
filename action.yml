@@ -36,6 +36,10 @@ outputs:
     description: "Space-separated list of CVE IDs included in this assessment."
   supported:
     description: "true if the product is in Attestd coverage. false means no data is available — not that the product is safe."
+  compromised:
+    description: "true if the version is flagged as a supply-chain compromise."
+  typosquat:
+    description: "true if the package name resembles a known package (possible typosquat)."
 
 runs:
   using: "node20"

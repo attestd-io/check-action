@@ -1,5 +1,5 @@
 const core = require("@actions/core");
-const { RISK_ORDER, shouldFail } = require("./lib");
+const { VALID_RISK_STATES, shouldFail } = require("./lib");
 
 const RISK_EMOJI = {
   none: "✅",
@@ -9,7 +9,7 @@ const RISK_EMOJI = {
   critical: "🚨",
 };
 
-async function fetchWithRetry(url, options, maxRetries = 3) {
+async function fetchWithRetry(url, options, maxRetries = 3, fetchFn = fetch) {
   let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) {
@@ -18,7 +18,7 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
       await new Promise((r) => setTimeout(r, delayMs));
     }
     try {
-      const response = await fetch(url, options);
+      const response = await fetchFn(url, options);
       // Only retry on transient server errors
       if (response.status < 500) return response;
       lastError = new Error(`HTTP ${response.status}`);
@@ -31,7 +31,9 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
   throw lastError;
 }
 
-async function run() {
+async function run(deps = {}) {
+  const core = deps.core || require("@actions/core");
+  const fetchFn = deps.fetch || fetch;
   try {
     const apiKey = core.getInput("api_key", { required: true });
     const product = core.getInput("product", { required: true });
@@ -44,8 +46,6 @@ async function run() {
     core.setSecret(apiKey);
 
     // Warn if the API key will be sent to a non-standard host.
-    // This guards against misconfigured or attacker-controlled base_url values
-    // that would cause the Bearer token to be sent to an unexpected destination.
     const parsedBase = new URL(baseUrl);
     if (parsedBase.hostname !== "api.attestd.io") {
       core.warning(
@@ -72,12 +72,20 @@ async function run() {
           },
           signal: AbortSignal.timeout(10_000),
         },
-        3
+        3,
+        fetchFn
       );
     } catch (err) {
-      core.setFailed(
-        `Could not reach the Attestd API: ${err.message}. Check your network or try again shortly.`
-      );
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.startsWith("HTTP ")) {
+        core.setFailed(
+          `Attestd API unavailable after retries (${msg}). Check status or try again shortly.`
+        );
+      } else {
+        core.setFailed(
+          `Could not reach the Attestd API: ${msg}. Check your network or try again shortly.`
+        );
+      }
       return;
     }
 
@@ -103,19 +111,35 @@ async function run() {
 
     const data = await response.json();
 
-    // Unsupported product — warn and exit cleanly. This is not a workflow error.
-    // The absence of coverage is not a safety signal.
-    if (!data.supported) {
-      core.warning(
-        `${product} is not in Attestd's current coverage. ` +
-          `No risk data is available — this does not mean the product is safe. ` +
-          `See https://attestd.io/docs/products`
-      );
+    // Unsupported product — warn and exit cleanly unless typosquat detected.
+    if (data.supported === false) {
+      const typosquatDetected = data.typosquat?.detected === true;
+      const resembles = data.typosquat?.resembles || "";
+
       core.setOutput("supported", "false");
       core.setOutput("risk_state", "");
       core.setOutput("actively_exploited", "false");
       core.setOutput("fixed_version", "");
       core.setOutput("cve_ids", "");
+      core.setOutput("compromised", "false");
+      core.setOutput("typosquat", typosquatDetected ? "true" : "false");
+
+      if (typosquatDetected) {
+        const typoMsg =
+          `Package name "${product}" resembles "${resembles}" (possible typosquat). ` +
+          `Verify you intended this package name.`;
+        core.error(typoMsg, { title: "Attestd typosquat warning" });
+        if (failOn !== "never") {
+          core.setFailed(typoMsg);
+          return;
+        }
+      }
+
+      core.warning(
+        `${product} is not in Attestd's current coverage. ` +
+          `No risk data is available — this does not mean the product is safe. ` +
+          `See https://attestd.io/docs/products`
+      );
 
       await core.summary
         .addHeading(`Attestd: ${product} ${version}`)
@@ -131,40 +155,75 @@ async function run() {
       risk_state,
       actively_exploited,
       fixed_version,
-      cve_ids = [],
     } = data;
+    const cveIds = Array.isArray(data.cve_ids) ? data.cve_ids : [];
+    const compromised = data.supply_chain?.compromised === true;
 
-    // Set step outputs for downstream steps
     core.setOutput("supported", "true");
-    core.setOutput("risk_state", risk_state);
-    core.setOutput("actively_exploited", String(actively_exploited));
+    core.setOutput("risk_state", risk_state || "");
+    core.setOutput("actively_exploited", String(Boolean(actively_exploited)));
     core.setOutput("fixed_version", fixed_version || "");
-    core.setOutput("cve_ids", cve_ids.join(" "));
+    core.setOutput("cve_ids", cveIds.join(" "));
+    core.setOutput("compromised", String(compromised));
+    core.setOutput("typosquat", "false");
 
-    // Write job summary
+    if (!VALID_RISK_STATES.has(risk_state)) {
+      core.setFailed(
+        `Attestd returned an unrecognized risk_state "${risk_state ?? "missing"}". Failing closed.`
+      );
+      return;
+    }
+
     const emoji = RISK_EMOJI[risk_state] || "❓";
+    const supplyChain = data.supply_chain || {};
+    const summaryRows = [
+      [
+        { data: "Field", header: true },
+        { data: "Value", header: true },
+      ],
+      ["Product", product],
+      ["Version", version],
+      ["Risk state", `${emoji} ${risk_state}`],
+      ["Actively exploited", actively_exploited ? "⚠️ Yes (CISA KEV)" : "No"],
+      ["CVEs", cveIds.length > 0 ? cveIds.join(", ") : "None"],
+      ["Fix available", fixed_version || "None known"],
+    ];
+
+    if (supplyChain.compromised) {
+      summaryRows.push([
+        "Supply chain",
+        [
+          "⚠️ Compromised",
+          supplyChain.malware_type ? `(${supplyChain.malware_type})` : "",
+          supplyChain.advisory_url ? `[advisory](${supplyChain.advisory_url})` : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      ]);
+    }
 
     await core.summary
       .addHeading(`Attestd: ${product} ${version}`)
-      .addTable([
-        [
-          { data: "Field", header: true },
-          { data: "Value", header: true },
-        ],
-        ["Product", product],
-        ["Version", version],
-        ["Risk state", `${emoji} ${risk_state}`],
-        ["Actively exploited", actively_exploited ? "⚠️ Yes (CISA KEV)" : "No"],
-        ["CVEs", cve_ids.length > 0 ? cve_ids.join(", ") : "None"],
-        ["Fix available", fixed_version || "None known"],
-      ])
+      .addTable(summaryRows)
       .addLink(
         `View ${product} on Attestd docs`,
         `https://attestd.io/docs/products/${product}`
       )
       .write();
 
-    // Determine pass/fail
+    if (compromised) {
+      const scMsg =
+        `${product} ${version} is flagged as a supply-chain compromise` +
+        (supplyChain.malware_type ? ` (${supplyChain.malware_type})` : "") +
+        (supplyChain.advisory_url ? `. Advisory: ${supplyChain.advisory_url}` : ".");
+      if (failOn === "never") {
+        core.error(scMsg, { title: "Attestd supply chain compromise" });
+      } else {
+        core.setFailed(scMsg);
+      }
+      return;
+    }
+
     if (shouldFail(risk_state, failOn, core)) {
       let message = `${product} ${version} has risk state "${risk_state}"`;
       if (actively_exploited) {
@@ -189,4 +248,8 @@ async function run() {
   }
 }
 
-run();
+module.exports = { run, fetchWithRetry };
+
+if (require.main === module) {
+  run();
+}
