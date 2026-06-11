@@ -34,13 +34,3 @@ describe("supported:false handling", () => {
     expect(data.supported === false).toBe(true);
   });
 });
-
-describe("HTTP status handling", () => {
-  it("maps 401 to auth failure", () => {
-    expect(401).toBe(401);
-  });
-
-  it("maps 429 to quota failure", () => {
-    expect(429).toBe(429);
-  });
-});

@@ -25643,11 +25643,276 @@ module.exports = {
 
 /***/ }),
 
+/***/ 5105:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+/* module decorator */ module = __nccwpck_require__.nmd(module);
+const core = __nccwpck_require__(7484);
+const { VALID_RISK_STATES, shouldFail } = __nccwpck_require__(1482);
+
+const RISK_EMOJI = {
+  none: "✅",
+  low: "🟡",
+  elevated: "🟠",
+  high: "🔴",
+  critical: "🚨",
+};
+
+async function fetchWithRetry(url, options, maxRetries = 3, fetchFn = fetch) {
+  let lastError;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      const delayMs = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
+      core.debug(`Retry ${attempt}/${maxRetries} after ${delayMs}ms...`);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+    try {
+      const response = await fetchFn(url, options);
+      // Only retry on transient server errors
+      if (response.status < 500) return response;
+      lastError = new Error(`HTTP ${response.status}`);
+      core.debug(`Received ${response.status}, will retry if attempts remain.`);
+    } catch (err) {
+      lastError = err;
+      core.debug(`Request failed: ${err.message}`);
+    }
+  }
+  throw lastError;
+}
+
+async function run(deps = {}) {
+  const core = deps.core || __nccwpck_require__(7484);
+  const fetchFn = deps.fetch || fetch;
+  try {
+    const apiKey = core.getInput("api_key", { required: true });
+    const product = core.getInput("product", { required: true });
+    const version = core.getInput("version", { required: true });
+    const failOn = core.getInput("fail_on") || "high";
+    const baseUrl =
+      core.getInput("base_url") || "https://api.attestd.io";
+
+    // Mask the key so it never appears in step logs
+    core.setSecret(apiKey);
+
+    // Warn if the API key will be sent to a non-standard host.
+    const parsedBase = new URL(baseUrl);
+    if (parsedBase.hostname !== "api.attestd.io") {
+      core.warning(
+        `Non-standard base_url hostname: "${parsedBase.hostname}". ` +
+          `Your API key will be sent to this host. Verify this is intentional.`
+      );
+    }
+
+    const url = new URL("/v1/check", baseUrl);
+    url.searchParams.set("product", product);
+    url.searchParams.set("version", version);
+
+    core.info(`Checking ${product} ${version}...`);
+
+    let response;
+    try {
+      response = await fetchWithRetry(
+        url.toString(),
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "User-Agent": "attestd-check-action/1",
+            Accept: "application/json",
+          },
+          signal: AbortSignal.timeout(10_000),
+        },
+        3,
+        fetchFn
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.startsWith("HTTP ")) {
+        core.setFailed(
+          `Attestd API unavailable after retries (${msg}). Check status or try again shortly.`
+        );
+      } else {
+        core.setFailed(
+          `Could not reach the Attestd API: ${msg}. Check your network or try again shortly.`
+        );
+      }
+      return;
+    }
+
+    if (response.status === 401) {
+      core.setFailed(
+        "API key is invalid or revoked. Verify your ATTESTD_API_KEY secret at https://api.attestd.io/portal/login."
+      );
+      return;
+    }
+
+    if (response.status === 429) {
+      const retryAfter = response.headers.get("Retry-After");
+      core.setFailed(
+        `Monthly call quota exceeded.${retryAfter ? ` Retry after ${retryAfter}s.` : ""}`
+      );
+      return;
+    }
+
+    if (!response.ok) {
+      core.setFailed(`Attestd API returned an unexpected HTTP ${response.status}.`);
+      return;
+    }
+
+    const data = await response.json();
+
+    // Unsupported product — warn and exit cleanly unless typosquat detected.
+    if (data.supported === false) {
+      const typosquatDetected = data.typosquat?.detected === true;
+      const resembles = data.typosquat?.resembles || "";
+
+      core.setOutput("supported", "false");
+      core.setOutput("risk_state", "");
+      core.setOutput("actively_exploited", "false");
+      core.setOutput("fixed_version", "");
+      core.setOutput("cve_ids", "");
+      core.setOutput("compromised", "false");
+      core.setOutput("typosquat", typosquatDetected ? "true" : "false");
+
+      if (typosquatDetected) {
+        const typoMsg =
+          `Package name "${product}" resembles "${resembles}" (possible typosquat). ` +
+          `Verify you intended this package name.`;
+        core.error(typoMsg, { title: "Attestd typosquat warning" });
+        if (failOn !== "never") {
+          core.setFailed(typoMsg);
+          return;
+        }
+      }
+
+      core.warning(
+        `${product} is not in Attestd's current coverage. ` +
+          `No risk data is available — this does not mean the product is safe. ` +
+          `See https://attestd.io/docs/products`
+      );
+
+      await core.summary
+        .addHeading(`Attestd: ${product} ${version}`)
+        .addRaw(
+          `**Not covered** — ${product} is not in Attestd's current coverage. ` +
+            `[Request coverage](https://attestd.io/docs/products)`
+        )
+        .write();
+      return;
+    }
+
+    const {
+      risk_state,
+      actively_exploited,
+      fixed_version,
+    } = data;
+    const cveIds = Array.isArray(data.cve_ids) ? data.cve_ids : [];
+    const compromised = data.supply_chain?.compromised === true;
+
+    core.setOutput("supported", "true");
+    core.setOutput("risk_state", risk_state || "");
+    core.setOutput("actively_exploited", String(Boolean(actively_exploited)));
+    core.setOutput("fixed_version", fixed_version || "");
+    core.setOutput("cve_ids", cveIds.join(" "));
+    core.setOutput("compromised", String(compromised));
+    core.setOutput("typosquat", "false");
+
+    if (!VALID_RISK_STATES.has(risk_state)) {
+      core.setFailed(
+        `Attestd returned an unrecognized risk_state "${risk_state ?? "missing"}". Failing closed.`
+      );
+      return;
+    }
+
+    const emoji = RISK_EMOJI[risk_state] || "❓";
+    const supplyChain = data.supply_chain || {};
+    const summaryRows = [
+      [
+        { data: "Field", header: true },
+        { data: "Value", header: true },
+      ],
+      ["Product", product],
+      ["Version", version],
+      ["Risk state", `${emoji} ${risk_state}`],
+      ["Actively exploited", actively_exploited ? "⚠️ Yes (CISA KEV)" : "No"],
+      ["CVEs", cveIds.length > 0 ? cveIds.join(", ") : "None"],
+      ["Fix available", fixed_version || "None known"],
+    ];
+
+    if (supplyChain.compromised) {
+      summaryRows.push([
+        "Supply chain",
+        [
+          "⚠️ Compromised",
+          supplyChain.malware_type ? `(${supplyChain.malware_type})` : "",
+          supplyChain.advisory_url ? `[advisory](${supplyChain.advisory_url})` : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      ]);
+    }
+
+    await core.summary
+      .addHeading(`Attestd: ${product} ${version}`)
+      .addTable(summaryRows)
+      .addLink(
+        `View ${product} on Attestd docs`,
+        `https://attestd.io/docs/products/${product}`
+      )
+      .write();
+
+    if (compromised) {
+      const scMsg =
+        `${product} ${version} is flagged as a supply-chain compromise` +
+        (supplyChain.malware_type ? ` (${supplyChain.malware_type})` : "") +
+        (supplyChain.advisory_url ? `. Advisory: ${supplyChain.advisory_url}` : ".");
+      if (failOn === "never") {
+        core.error(scMsg, { title: "Attestd supply chain compromise" });
+      } else {
+        core.setFailed(scMsg);
+      }
+      return;
+    }
+
+    if (shouldFail(risk_state, failOn, core)) {
+      let message = `${product} ${version} has risk state "${risk_state}"`;
+      if (actively_exploited) {
+        message += " and is actively exploited in the wild (CISA KEV)";
+      }
+      if (fixed_version) {
+        message += `. Upgrade to ${fixed_version} to resolve.`;
+      } else {
+        message += ". No fix is currently available.";
+      }
+      core.setFailed(message);
+    } else {
+      core.info(`${emoji} ${product} ${version}: ${risk_state}`);
+      if (actively_exploited) {
+        core.warning(
+          `${product} ${version} is actively exploited (CISA KEV) but is below the configured fail_on threshold ("${failOn}").`
+        );
+      }
+    }
+  } catch (err) {
+    core.setFailed(`Unexpected error: ${err.message}`);
+  }
+}
+
+module.exports = { run, fetchWithRetry };
+
+if (__nccwpck_require__.c[__nccwpck_require__.s] === module) {
+  run();
+}
+
+
+/***/ }),
+
 /***/ 1482:
 /***/ ((module) => {
 
 // Risk state severity order — higher number = more severe
 const RISK_ORDER = { none: 0, low: 1, elevated: 2, high: 3, critical: 4 };
+
+const VALID_RISK_STATES = new Set(["none", "low", "elevated", "high", "critical"]);
 
 // Maps the fail_on input to the lowest risk_state that triggers failure
 const FAIL_ON_THRESHOLD = {
@@ -25672,7 +25937,12 @@ function shouldFail(riskState, failOn, logger) {
   return RISK_ORDER[riskState] >= RISK_ORDER[threshold];
 }
 
-module.exports = { RISK_ORDER, FAIL_ON_THRESHOLD, shouldFail };
+module.exports = {
+  RISK_ORDER,
+  VALID_RISK_STATES,
+  FAIL_ON_THRESHOLD,
+  shouldFail,
+};
 
 
 /***/ }),
@@ -27564,8 +27834,8 @@ module.exports = parseParams
 /******/ 		}
 /******/ 		// Create a new module (and put it into the cache)
 /******/ 		var module = __webpack_module_cache__[moduleId] = {
-/******/ 			// no module.id needed
-/******/ 			// no module.loaded needed
+/******/ 			id: moduleId,
+/******/ 			loaded: false,
 /******/ 			exports: {}
 /******/ 		};
 /******/ 	
@@ -27578,210 +27848,37 @@ module.exports = parseParams
 /******/ 			if(threw) delete __webpack_module_cache__[moduleId];
 /******/ 		}
 /******/ 	
+/******/ 		// Flag the module as loaded
+/******/ 		module.loaded = true;
+/******/ 	
 /******/ 		// Return the exports of the module
 /******/ 		return module.exports;
 /******/ 	}
 /******/ 	
+/******/ 	// expose the module cache
+/******/ 	__nccwpck_require__.c = __webpack_module_cache__;
+/******/ 	
 /************************************************************************/
+/******/ 	/* webpack/runtime/node module decorator */
+/******/ 	(() => {
+/******/ 		__nccwpck_require__.nmd = (module) => {
+/******/ 			module.paths = [];
+/******/ 			if (!module.children) module.children = [];
+/******/ 			return module;
+/******/ 		};
+/******/ 	})();
+/******/ 	
 /******/ 	/* webpack/runtime/compat */
 /******/ 	
 /******/ 	if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = __dirname + "/";
 /******/ 	
 /************************************************************************/
-var __webpack_exports__ = {};
-const core = __nccwpck_require__(7484);
-const { RISK_ORDER, shouldFail } = __nccwpck_require__(1482);
-
-const RISK_EMOJI = {
-  none: "✅",
-  low: "🟡",
-  elevated: "🟠",
-  high: "🔴",
-  critical: "🚨",
-};
-
-async function fetchWithRetry(url, options, maxRetries = 3) {
-  let lastError;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    if (attempt > 0) {
-      const delayMs = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
-      core.debug(`Retry ${attempt}/${maxRetries} after ${delayMs}ms...`);
-      await new Promise((r) => setTimeout(r, delayMs));
-    }
-    try {
-      const response = await fetch(url, options);
-      // Only retry on transient server errors
-      if (response.status < 500) return response;
-      lastError = new Error(`HTTP ${response.status}`);
-      core.debug(`Received ${response.status}, will retry if attempts remain.`);
-    } catch (err) {
-      lastError = err;
-      core.debug(`Request failed: ${err.message}`);
-    }
-  }
-  throw lastError;
-}
-
-async function run() {
-  try {
-    const apiKey = core.getInput("api_key", { required: true });
-    const product = core.getInput("product", { required: true });
-    const version = core.getInput("version", { required: true });
-    const failOn = core.getInput("fail_on") || "high";
-    const baseUrl =
-      core.getInput("base_url") || "https://api.attestd.io";
-
-    // Mask the key so it never appears in step logs
-    core.setSecret(apiKey);
-
-    // Warn if the API key will be sent to a non-standard host.
-    // This guards against misconfigured or attacker-controlled base_url values
-    // that would cause the Bearer token to be sent to an unexpected destination.
-    const parsedBase = new URL(baseUrl);
-    if (parsedBase.hostname !== "api.attestd.io") {
-      core.warning(
-        `Non-standard base_url hostname: "${parsedBase.hostname}". ` +
-          `Your API key will be sent to this host. Verify this is intentional.`
-      );
-    }
-
-    const url = new URL("/v1/check", baseUrl);
-    url.searchParams.set("product", product);
-    url.searchParams.set("version", version);
-
-    core.info(`Checking ${product} ${version}...`);
-
-    let response;
-    try {
-      response = await fetchWithRetry(
-        url.toString(),
-        {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "User-Agent": "attestd-check-action/1",
-            Accept: "application/json",
-          },
-          signal: AbortSignal.timeout(10_000),
-        },
-        3
-      );
-    } catch (err) {
-      core.setFailed(
-        `Could not reach the Attestd API: ${err.message}. Check your network or try again shortly.`
-      );
-      return;
-    }
-
-    if (response.status === 401) {
-      core.setFailed(
-        "API key is invalid or revoked. Verify your ATTESTD_API_KEY secret at https://api.attestd.io/portal/login."
-      );
-      return;
-    }
-
-    if (response.status === 429) {
-      const retryAfter = response.headers.get("Retry-After");
-      core.setFailed(
-        `Monthly call quota exceeded.${retryAfter ? ` Retry after ${retryAfter}s.` : ""}`
-      );
-      return;
-    }
-
-    if (!response.ok) {
-      core.setFailed(`Attestd API returned an unexpected HTTP ${response.status}.`);
-      return;
-    }
-
-    const data = await response.json();
-
-    // Unsupported product — warn and exit cleanly. This is not a workflow error.
-    // The absence of coverage is not a safety signal.
-    if (!data.supported) {
-      core.warning(
-        `${product} is not in Attestd's current coverage. ` +
-          `No risk data is available — this does not mean the product is safe. ` +
-          `See https://attestd.io/docs/products`
-      );
-      core.setOutput("supported", "false");
-      core.setOutput("risk_state", "");
-      core.setOutput("actively_exploited", "false");
-      core.setOutput("fixed_version", "");
-      core.setOutput("cve_ids", "");
-
-      await core.summary
-        .addHeading(`Attestd: ${product} ${version}`)
-        .addRaw(
-          `**Not covered** — ${product} is not in Attestd's current coverage. ` +
-            `[Request coverage](https://attestd.io/docs/products)`
-        )
-        .write();
-      return;
-    }
-
-    const {
-      risk_state,
-      actively_exploited,
-      fixed_version,
-      cve_ids = [],
-    } = data;
-
-    // Set step outputs for downstream steps
-    core.setOutput("supported", "true");
-    core.setOutput("risk_state", risk_state);
-    core.setOutput("actively_exploited", String(actively_exploited));
-    core.setOutput("fixed_version", fixed_version || "");
-    core.setOutput("cve_ids", cve_ids.join(" "));
-
-    // Write job summary
-    const emoji = RISK_EMOJI[risk_state] || "❓";
-
-    await core.summary
-      .addHeading(`Attestd: ${product} ${version}`)
-      .addTable([
-        [
-          { data: "Field", header: true },
-          { data: "Value", header: true },
-        ],
-        ["Product", product],
-        ["Version", version],
-        ["Risk state", `${emoji} ${risk_state}`],
-        ["Actively exploited", actively_exploited ? "⚠️ Yes (CISA KEV)" : "No"],
-        ["CVEs", cve_ids.length > 0 ? cve_ids.join(", ") : "None"],
-        ["Fix available", fixed_version || "None known"],
-      ])
-      .addLink(
-        `View ${product} on Attestd docs`,
-        `https://attestd.io/docs/products/${product}`
-      )
-      .write();
-
-    // Determine pass/fail
-    if (shouldFail(risk_state, failOn, core)) {
-      let message = `${product} ${version} has risk state "${risk_state}"`;
-      if (actively_exploited) {
-        message += " and is actively exploited in the wild (CISA KEV)";
-      }
-      if (fixed_version) {
-        message += `. Upgrade to ${fixed_version} to resolve.`;
-      } else {
-        message += ". No fix is currently available.";
-      }
-      core.setFailed(message);
-    } else {
-      core.info(`${emoji} ${product} ${version}: ${risk_state}`);
-      if (actively_exploited) {
-        core.warning(
-          `${product} ${version} is actively exploited (CISA KEV) but is below the configured fail_on threshold ("${failOn}").`
-        );
-      }
-    }
-  } catch (err) {
-    core.setFailed(`Unexpected error: ${err.message}`);
-  }
-}
-
-run();
-
-module.exports = __webpack_exports__;
+/******/ 	
+/******/ 	// module cache are used so entry inlining is disabled
+/******/ 	// startup
+/******/ 	// Load entry module and return exports
+/******/ 	var __webpack_exports__ = __nccwpck_require__(__nccwpck_require__.s = 5105);
+/******/ 	module.exports = __webpack_exports__;
+/******/ 	
 /******/ })()
 ;
