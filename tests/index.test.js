@@ -124,6 +124,32 @@ describe("run", () => {
     expect(core.setFailed).toHaveBeenCalled();
   });
 
+  it("errors on typosquat for supported product when fail_on is high", async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        supported: true,
+        product: "langchian",
+        version: "0.1.0",
+        risk_state: "none",
+        actively_exploited: false,
+        fixed_version: null,
+        cve_ids: [],
+        typosquat: { detected: true, resembles: "langchain" },
+      }),
+    });
+
+    await run({ core, fetch });
+
+    expect(core.error).toHaveBeenCalledWith(
+      expect.stringContaining("typosquat"),
+      expect.objectContaining({ title: "Attestd typosquat warning" })
+    );
+    expect(core.setFailed).toHaveBeenCalled();
+    expect(core.setOutput).toHaveBeenCalledWith("typosquat", "true");
+  });
+
   it("returns 401 failure without throwing", async () => {
     const fetch = vi.fn().mockResolvedValue({
       status: 401,
