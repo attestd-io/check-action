@@ -25667,7 +25667,10 @@ async function fetchWithRetry(url, options, maxRetries = 3, fetchFn = fetch) {
       await new Promise((r) => setTimeout(r, delayMs));
     }
     try {
-      const response = await fetchFn(url, options);
+      const response = await fetchFn(url, {
+        ...options,
+        signal: AbortSignal.timeout(10_000),
+      });
       // Only retry on transient server errors
       if (response.status < 500) return response;
       lastError = new Error(`HTTP ${response.status}`);
@@ -25719,22 +25722,15 @@ async function run(deps = {}) {
             "User-Agent": "attestd-check-action/1",
             Accept: "application/json",
           },
-          signal: AbortSignal.timeout(10_000),
         },
         3,
         fetchFn
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.startsWith("HTTP ")) {
-        core.setFailed(
-          `Attestd API unavailable after retries (${msg}). Check status or try again shortly.`
-        );
-      } else {
-        core.setFailed(
-          `Could not reach the Attestd API: ${msg}. Check your network or try again shortly.`
-        );
-      }
+      core.setFailed(
+        `Could not reach the Attestd API: ${msg}. Check your network or try again shortly.`
+      );
       return;
     }
 
@@ -25804,9 +25800,13 @@ async function run(deps = {}) {
       risk_state,
       actively_exploited,
       fixed_version,
+      product: apiProduct,
     } = data;
     const cveIds = Array.isArray(data.cve_ids) ? data.cve_ids : [];
     const compromised = data.supply_chain?.compromised === true;
+    const typosquatDetected = data.typosquat?.detected === true;
+    const resembles = data.typosquat?.resembles || "";
+    const docsSlug = apiProduct || product;
 
     core.setOutput("supported", "true");
     core.setOutput("risk_state", risk_state || "");
@@ -25814,13 +25814,24 @@ async function run(deps = {}) {
     core.setOutput("fixed_version", fixed_version || "");
     core.setOutput("cve_ids", cveIds.join(" "));
     core.setOutput("compromised", String(compromised));
-    core.setOutput("typosquat", "false");
+    core.setOutput("typosquat", typosquatDetected ? "true" : "false");
 
     if (!VALID_RISK_STATES.has(risk_state)) {
       core.setFailed(
         `Attestd returned an unrecognized risk_state "${risk_state ?? "missing"}". Failing closed.`
       );
       return;
+    }
+
+    if (typosquatDetected) {
+      const typoMsg =
+        `Package name "${product}" resembles "${resembles}" (possible typosquat). ` +
+        `Verify you intended this package name.`;
+      core.error(typoMsg, { title: "Attestd typosquat warning" });
+      if (failOn !== "never") {
+        core.setFailed(typoMsg);
+        return;
+      }
     }
 
     const emoji = RISK_EMOJI[risk_state] || "❓";
@@ -25855,8 +25866,8 @@ async function run(deps = {}) {
       .addHeading(`Attestd: ${product} ${version}`)
       .addTable(summaryRows)
       .addLink(
-        `View ${product} on Attestd docs`,
-        `https://attestd.io/docs/products/${product}`
+        `View ${docsSlug} on Attestd docs`,
+        `https://attestd.io/docs/products/${docsSlug}`
       )
       .write();
 

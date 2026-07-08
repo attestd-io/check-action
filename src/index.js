@@ -18,7 +18,10 @@ async function fetchWithRetry(url, options, maxRetries = 3, fetchFn = fetch) {
       await new Promise((r) => setTimeout(r, delayMs));
     }
     try {
-      const response = await fetchFn(url, options);
+      const response = await fetchFn(url, {
+        ...options,
+        signal: AbortSignal.timeout(10_000),
+      });
       // Only retry on transient server errors
       if (response.status < 500) return response;
       lastError = new Error(`HTTP ${response.status}`);
@@ -62,15 +65,18 @@ async function run(deps = {}) {
 
     let response;
     try {
-      // Single attempt: /v1/check is billable and has no idempotency key.
-      response = await fetchFn(url.toString(), {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "User-Agent": "attestd-check-action/1",
-          Accept: "application/json",
+      response = await fetchWithRetry(
+        url.toString(),
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "User-Agent": "attestd-check-action/1",
+            Accept: "application/json",
+          },
         },
-        signal: AbortSignal.timeout(10_000),
-      });
+        3,
+        fetchFn
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       core.setFailed(

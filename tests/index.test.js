@@ -150,7 +150,45 @@ describe("run", () => {
     expect(core.setOutput).toHaveBeenCalledWith("typosquat", "true");
   });
 
-  it("returns 401 failure without throwing", async () => {
+  it("succeeds after one transient 503 then 200", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 503, ok: false })
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          supported: true,
+          risk_state: "none",
+          actively_exploited: false,
+          cve_ids: [],
+          supply_chain: null,
+        }),
+      });
+
+    await run({ core, fetch });
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(core.setFailed).not.toHaveBeenCalled();
+    expect(core.setOutput).toHaveBeenCalledWith("risk_state", "none");
+  });
+
+  it("does not retry on 429", async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      status: 429,
+      ok: false,
+      headers: { get: () => null },
+    });
+
+    await run({ core, fetch });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining("Monthly call quota exceeded")
+    );
+  });
+
+  it("does not retry on 401", async () => {
     const fetch = vi.fn().mockResolvedValue({
       status: 401,
       ok: false,
@@ -158,6 +196,7 @@ describe("run", () => {
 
     await run({ core, fetch });
 
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(core.setFailed).toHaveBeenCalledWith(
       expect.stringContaining("invalid or revoked")
     );
