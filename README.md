@@ -114,7 +114,9 @@ jobs:
 See [attestd.io/docs/products](https://attestd.io/docs/products) for the full list of supported
 products, including the correct API slug and version format for each.
 
-If a product is not currently covered, the step exits with a warning rather than failing.
+If a product is not currently covered, the step exits with a warning rather than failing,
+unless a typosquat is detected on that product name (the step fails unless `fail_on: never`).
+A confirmed supply-chain compromise always fails the step, regardless of `fail_on` threshold.
 The absence of Attestd coverage is not a safety signal.
 
 ## Getting an API key
