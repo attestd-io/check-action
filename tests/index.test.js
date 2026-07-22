@@ -67,6 +67,63 @@ describe("run", () => {
     expect(core.setOutput).toHaveBeenCalledWith("compromised", "true");
   });
 
+  it("sets provenance output and fails when fail_on_provenance_missing", async () => {
+    core = makeCore({
+      inputs: {
+        fail_on_provenance_missing: "true",
+      },
+    });
+    const fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        supported: true,
+        product: "@mastra/core",
+        version: "0.10.0",
+        risk_state: "none",
+        actively_exploited: false,
+        fixed_version: null,
+        cve_ids: [],
+        supply_chain: {
+          compromised: false,
+          provenance: false,
+        },
+      }),
+    });
+
+    await run({ core, fetch });
+
+    expect(core.setOutput).toHaveBeenCalledWith("provenance", "false");
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining("missing npm provenance")
+    );
+  });
+
+  it("does not fail on provenance false when fail_on_provenance_missing is off", async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        supported: true,
+        product: "@mastra/core",
+        version: "0.10.0",
+        risk_state: "none",
+        actively_exploited: false,
+        fixed_version: null,
+        cve_ids: [],
+        supply_chain: {
+          compromised: false,
+          provenance: false,
+        },
+      }),
+    });
+
+    await run({ core, fetch });
+
+    expect(core.setOutput).toHaveBeenCalledWith("provenance", "false");
+    expect(core.setFailed).not.toHaveBeenCalled();
+  });
+
   it("fails closed on unrecognized risk_state", async () => {
     const fetch = vi.fn().mockResolvedValue({
       status: 200,

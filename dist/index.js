@@ -25691,6 +25691,9 @@ async function run(deps = {}) {
     const product = core.getInput("product", { required: true });
     const version = core.getInput("version", { required: true });
     const failOn = core.getInput("fail_on") || "high";
+    const failOnProvenanceMissing =
+      (core.getInput("fail_on_provenance_missing") || "false").toLowerCase() ===
+      "true";
     const baseUrl =
       core.getInput("base_url") || "https://api.attestd.io";
 
@@ -25767,6 +25770,7 @@ async function run(deps = {}) {
       core.setOutput("fixed_version", "");
       core.setOutput("cve_ids", "");
       core.setOutput("compromised", "false");
+      core.setOutput("provenance", "");
       core.setOutput("typosquat", typosquatDetected ? "true" : "false");
 
       if (typosquatDetected) {
@@ -25804,6 +25808,10 @@ async function run(deps = {}) {
     } = data;
     const cveIds = Array.isArray(data.cve_ids) ? data.cve_ids : [];
     const compromised = data.supply_chain?.compromised === true;
+    const provenanceRaw = data.supply_chain?.provenance;
+    const provenanceMissing = provenanceRaw === false;
+    const provenanceOut =
+      provenanceRaw === true ? "true" : provenanceRaw === false ? "false" : "";
     const typosquatDetected = data.typosquat?.detected === true;
     const resembles = data.typosquat?.resembles || "";
     const docsSlug = apiProduct || product;
@@ -25814,6 +25822,7 @@ async function run(deps = {}) {
     core.setOutput("fixed_version", fixed_version || "");
     core.setOutput("cve_ids", cveIds.join(" "));
     core.setOutput("compromised", String(compromised));
+    core.setOutput("provenance", provenanceOut);
     core.setOutput("typosquat", typosquatDetected ? "true" : "false");
 
     if (!VALID_RISK_STATES.has(risk_state)) {
@@ -25862,6 +25871,15 @@ async function run(deps = {}) {
       ]);
     }
 
+    if (provenanceRaw === true) {
+      summaryRows.push(["Provenance", "✅ Attested"]);
+    } else if (provenanceMissing) {
+      summaryRows.push([
+        "Provenance",
+        "⚠️ Missing (package publishes provenance, this version does not)",
+      ]);
+    }
+
     await core.summary
       .addHeading(`Attestd: ${product} ${version}`)
       .addTable(summaryRows)
@@ -25880,6 +25898,18 @@ async function run(deps = {}) {
         core.error(scMsg, { title: "Attestd supply chain compromise" });
       } else {
         core.setFailed(scMsg);
+      }
+      return;
+    }
+
+    if (provenanceMissing && failOnProvenanceMissing) {
+      const provMsg =
+        `${product} ${version} is missing npm provenance attestation ` +
+        `(package has a provenance baseline). This can indicate a compromised publish.`;
+      if (failOn === "never") {
+        core.error(provMsg, { title: "Attestd provenance missing" });
+      } else {
+        core.setFailed(provMsg);
       }
       return;
     }

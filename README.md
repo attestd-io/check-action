@@ -32,6 +32,7 @@ By default the step fails on `high` or `critical` risk. Adjust with `fail_on`:
 | `product` | Yes | — | Product slug to check. See [supported products](https://attestd.io/docs/products). |
 | `version` | Yes | — | Version string (e.g. `1.20.0`, `9.2p1`, `2.17.1`). |
 | `fail_on` | No | `high` | Minimum risk state that fails the step: `critical`, `high`, `elevated`, `any`, `never`. |
+| `fail_on_provenance_missing` | No | `false` | If `true`, fail when `supply_chain.provenance` is `false` (baseline exists but this version lacks attestation). |
 | `base_url` | No | `https://api.attestd.io` | Attestd API base URL. Override only for local or staging tests. |
 
 ## Outputs
@@ -44,6 +45,7 @@ By default the step fails on `high` or `critical` risk. Adjust with `fail_on`:
 | `cve_ids` | Space-separated list of CVE IDs in the assessment. |
 | `supported` | `true` if the product is in Attestd coverage. |
 | `compromised` | `true` if flagged as a supply-chain compromise. |
+| `provenance` | `true` if attested, `false` if baseline drop, empty if unknown/`null`. |
 | `typosquat` | `true` if the package name resembles a known package. |
 
 ## Examples

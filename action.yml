@@ -20,6 +20,10 @@ inputs:
     description: "Minimum risk state that fails the step. Options: critical, high, elevated, any, never. Default: high."
     required: false
     default: "high"
+  fail_on_provenance_missing:
+    description: "If true, fail when supply_chain.provenance is false (package has a provenance baseline but this version lacks attestation). Default: false."
+    required: false
+    default: "false"
   base_url:
     description: "Attestd API base URL. Do not override unless testing against a local instance."
     required: false
@@ -38,6 +42,8 @@ outputs:
     description: "true if the product is in Attestd coverage. false means no data is available — not that the product is safe."
   compromised:
     description: "true if the version is flagged as a supply-chain compromise."
+  provenance:
+    description: "true if this version has npm provenance attestation; false if baseline exists but attestation is missing; empty if unknown/null."
   typosquat:
     description: "true if the package name resembles a known package (possible typosquat)."
 
