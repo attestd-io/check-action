@@ -1,0 +1,23 @@
+{
+  "name": "workspace-root",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {
+      "name": "workspace-root",
+      "version": "1.0.0",
+      "workspaces": ["packages/local-pkg"]
+    },
+    "packages/local-pkg": {
+      "name": "local-pkg",
+      "version": "0.0.1"
+    },
+    "node_modules/local-pkg": {
+      "resolved": "packages/local-pkg",
+      "link": true
+    },
+    "node_modules/lodash": {
+      "version": "4.17.21"
+    }
+  }
+}

@@ -1,5 +1,5 @@
 name: "Attestd Dependency Check"
-description: "Check a dependency against the Attestd security risk API and fail the workflow if the risk state meets a configured threshold."
+description: "Check a dependency or whole lockfile against the Attestd security risk API and fail the workflow if risk meets a configured threshold."
 author: "Attestd"
 
 branding:
@@ -11,11 +11,14 @@ inputs:
     description: "Attestd API key (starts with atst_). Store as a repository secret."
     required: true
   product:
-    description: "Product slug to check (e.g. nginx, postgresql, openssh). See https://attestd.io/docs/products for the full list and version format notes."
-    required: true
+    description: "Product slug to check (e.g. nginx, postgresql, openssh). Mutually exclusive with lockfile."
+    required: false
   version:
-    description: "Version string to check (e.g. 1.20.0, 9.2p1, 2.17.1)."
-    required: true
+    description: "Version string to check (e.g. 1.20.0, 9.2p1, 2.17.1). Required with product."
+    required: false
+  lockfile:
+    description: "Path to requirements.txt or package-lock.json (v2/v3). Mutually exclusive with product/version."
+    required: false
   fail_on:
     description: "Minimum risk state that fails the step. Options: critical, high, elevated, any, never. Default: high."
     required: false
@@ -24,6 +27,14 @@ inputs:
     description: "If true, fail when supply_chain.provenance is false (package has a provenance baseline but this version lacks attestation). Default: false."
     required: false
     default: "false"
+  max_packages:
+    description: "Safety cap for lockfile scans. Fails before any API calls if the parsed package count exceeds this. Default: 2000."
+    required: false
+    default: "2000"
+  results_file:
+    description: "Path to write the lockfile scan JSON summary. Default: attestd-scan-results.json."
+    required: false
+    default: "attestd-scan-results.json"
   base_url:
     description: "Attestd API base URL. Do not override unless testing against a local instance."
     required: false
@@ -31,21 +42,31 @@ inputs:
 
 outputs:
   risk_state:
-    description: "Risk state returned by Attestd: critical, high, elevated, low, or none."
+    description: "Single-check: risk state returned by Attestd. Empty in lockfile mode."
   actively_exploited:
-    description: "true if the version is on the CISA KEV list, false otherwise."
+    description: "Single-check: true if on the CISA KEV list. Empty in lockfile mode."
   fixed_version:
-    description: "Earliest version that resolves all known CVEs, or empty string if none."
+    description: "Single-check: earliest safe version, or empty. Empty in lockfile mode."
   cve_ids:
-    description: "Space-separated list of CVE IDs included in this assessment."
+    description: "Single-check: space-separated CVE IDs. Empty in lockfile mode."
   supported:
-    description: "true if the product is in Attestd coverage. false means no data is available — not that the product is safe."
+    description: "Single-check: true if the product is in Attestd coverage. Empty in lockfile mode."
   compromised:
-    description: "true if the version is flagged as a supply-chain compromise."
+    description: "Single-check: true if flagged as a supply-chain compromise. Empty in lockfile mode."
   provenance:
-    description: "true if this version has npm provenance attestation; false if baseline exists but attestation is missing; empty if unknown/null."
+    description: "Single-check: true/false/empty provenance tri-state. Empty in lockfile mode."
   typosquat:
-    description: "true if the package name resembles a known package (possible typosquat)."
+    description: "Single-check: true if the package name resembles a known package. Empty in lockfile mode."
+  packages_scanned:
+    description: "Lockfile mode: number of packages checked via the API."
+  packages_flagged:
+    description: "Lockfile mode: number of packages that were compromised or high/critical (or failed gates)."
+  packages_unsupported:
+    description: "Lockfile mode: number of packages outside Attestd coverage."
+  highest_risk_state:
+    description: "Lockfile mode: highest risk_state among supported packages."
+  results_path:
+    description: "Lockfile mode: path to the written JSON summary file."
 
 runs:
   using: "node20"

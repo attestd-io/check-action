@@ -1,0 +1,12 @@
+# Mix of pins, ranges, and unsupported lines
+requests==2.31.0
+numpy>=1.24.0
+fastapi~=0.115.0
+-e git+https://github.com/example/pkg.git#egg=pkg
+git+https://github.com/example/other.git@v1.0
+-r other-requirements.txt
+# comment only
+flask
+urllib3==2.2.1 ; python_version >= "3.8"
+https://files.example.com/wheel.whl
+--index-url https://pypi.org/simple
