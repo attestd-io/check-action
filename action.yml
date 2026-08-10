@@ -1,5 +1,5 @@
 name: "Attestd Dependency Check"
-description: "Check a dependency or whole lockfile against the Attestd security risk API and fail the workflow if risk meets a configured threshold."
+description: "Check a dependency or lockfile against the Attestd risk API and fail the workflow if risk meets a threshold."
 author: "Attestd"
 
 branding:
