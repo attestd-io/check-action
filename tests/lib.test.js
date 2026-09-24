@@ -21,16 +21,3 @@ describe("shouldFail", () => {
     expect(shouldFail("elevated", "bogus")).toBe(false);
   });
 });
-
-describe("supported:false handling", () => {
-  it("treats missing supported as supported for legacy payloads", () => {
-    const data = { risk_state: "none" };
-    expect(data.supported).toBeUndefined();
-    expect(!data.supported).toBe(true);
-  });
-
-  it("detects explicit unsupported responses", () => {
-    const data = { supported: false };
-    expect(data.supported === false).toBe(true);
-  });
-});
