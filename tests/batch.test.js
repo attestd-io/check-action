@@ -105,6 +105,26 @@ describe("runBatch", () => {
     ).rejects.toMatchObject({ code: "auth" });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
+
+  it("throws http code when the 200 body is not JSON", async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => {
+        throw new SyntaxError("Unexpected token < in JSON");
+      },
+    });
+    await expect(
+      runBatch([{ product: "a", version: "1" }], {
+        apiKey: "atst_x",
+        baseUrl: "https://api.attestd.io",
+        fetchFn: fetch,
+      })
+    ).rejects.toMatchObject({
+      code: "http",
+      message: expect.stringContaining("Attestd API returned invalid JSON"),
+    });
+  });
 });
 
 describe("evaluateItem / highestRisk", () => {

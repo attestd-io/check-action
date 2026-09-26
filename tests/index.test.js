@@ -342,4 +342,23 @@ describe("run", () => {
     expect(core.setOutput).toHaveBeenCalledWith("supported", "true");
     expect(core.setFailed).toHaveBeenCalled();
   });
+
+  it("fails with invalid JSON instead of Unexpected error", async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => {
+        throw new SyntaxError("Unexpected token < in JSON");
+      },
+    });
+
+    await run({ core, fetch });
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining("Attestd API returned invalid JSON")
+    );
+    expect(core.setFailed).not.toHaveBeenCalledWith(
+      expect.stringContaining("Unexpected error")
+    );
+  });
 });

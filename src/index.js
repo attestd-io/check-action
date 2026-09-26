@@ -1,6 +1,6 @@
 const core = require("@actions/core");
 const { VALID_RISK_STATES, shouldFail } = require("./lib");
-const { fetchWithRetry } = require("./batch");
+const { fetchWithRetry, parseJsonBody } = require("./batch");
 const { runLockfileScan } = require("./lockfile");
 
 const RISK_EMOJI = {
@@ -70,7 +70,13 @@ async function runSingleCheck({
     return;
   }
 
-  const data = await response.json();
+  let data;
+  try {
+    data = await parseJsonBody(response);
+  } catch (err) {
+    core.setFailed(err.message);
+    return;
+  }
 
   // Unsupported product — warn and exit cleanly unless typosquat detected.
   if (data.supported === false) {
