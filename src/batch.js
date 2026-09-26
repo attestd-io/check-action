@@ -132,11 +132,22 @@ async function runBatch(items, { apiKey, baseUrl, fetchFn = fetch, log } = {}) {
     throw error;
   }
 
-  const data = await response.json();
+  const data = await parseJsonBody(response);
   return {
     results: Array.isArray(data.results) ? data.results : [],
     count: Number(data.count) || 0,
   };
+}
+
+async function parseJsonBody(response) {
+  try {
+    return await response.json();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const error = new Error(`Attestd API returned invalid JSON. ${msg}`);
+    error.code = "http";
+    throw error;
+  }
 }
 
 module.exports = {
@@ -145,4 +156,5 @@ module.exports = {
   fetchWithRetry,
   runBatch,
   readErrorDetail,
+  parseJsonBody,
 };

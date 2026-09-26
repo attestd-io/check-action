@@ -25780,11 +25780,22 @@ async function runBatch(items, { apiKey, baseUrl, fetchFn = fetch, log } = {}) {
     throw error;
   }
 
-  const data = await response.json();
+  const data = await parseJsonBody(response);
   return {
     results: Array.isArray(data.results) ? data.results : [],
     count: Number(data.count) || 0,
   };
+}
+
+async function parseJsonBody(response) {
+  try {
+    return await response.json();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const error = new Error(`Attestd API returned invalid JSON. ${msg}`);
+    error.code = "http";
+    throw error;
+  }
 }
 
 module.exports = {
@@ -25793,6 +25804,7 @@ module.exports = {
   fetchWithRetry,
   runBatch,
   readErrorDetail,
+  parseJsonBody,
 };
 
 
@@ -25803,7 +25815,7 @@ module.exports = {
 
 const core = __nccwpck_require__(7484);
 const { VALID_RISK_STATES, shouldFail } = __nccwpck_require__(1482);
-const { fetchWithRetry } = __nccwpck_require__(1305);
+const { fetchWithRetry, parseJsonBody } = __nccwpck_require__(1305);
 const { runLockfileScan } = __nccwpck_require__(2664);
 
 const RISK_EMOJI = {
@@ -25873,7 +25885,13 @@ async function runSingleCheck({
     return;
   }
 
-  const data = await response.json();
+  let data;
+  try {
+    data = await parseJsonBody(response);
+  } catch (err) {
+    core.setFailed(err.message);
+    return;
+  }
 
   // Unsupported product — warn and exit cleanly unless typosquat detected.
   if (data.supported === false) {
