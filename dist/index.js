@@ -26251,7 +26251,7 @@ function parseLockfile(lockfilePath, content) {
   if (!kind) {
     throw new Error(
       `Unsupported lockfile "${path.basename(lockfilePath)}". ` +
-        `Supported: requirements.txt, package-lock.json (v2/v3).`
+        `Supported: requirements.txt (including requirements*.txt and *-requirements.txt) and package-lock.json (v2/v3).`
     );
   }
   if (kind === "requirements") {

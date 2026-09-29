@@ -22,7 +22,7 @@ describe("detectParser", () => {
 describe("parseLockfile", () => {
   it("throws a supported-formats message for unknown files", () => {
     expect(() => parseLockfile("Pipfile.lock", "{}")).toThrow(
-      /Supported: requirements.txt, package-lock.json/
+      /Supported: requirements\.txt \(including requirements\*\.txt and \*-requirements\.txt\) and package-lock\.json \(v2\/v3\)/
     );
   });
 });
