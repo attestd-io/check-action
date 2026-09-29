@@ -17,7 +17,7 @@ inputs:
     description: "Version string to check (e.g. 1.20.0, 9.2p1, 2.17.1). Required with product."
     required: false
   lockfile:
-    description: "Path to requirements.txt or package-lock.json (v2/v3). Mutually exclusive with product/version."
+    description: "Path to a Python requirements file (requirements.txt, requirements-dev.txt, *-requirements.txt) or package-lock.json (v2/v3). Mutually exclusive with product/version."
     required: false
   fail_on:
     description: "Minimum risk state that fails the step. Options: critical, high, elevated, any, never. Default: high."
