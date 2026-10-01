@@ -25781,8 +25781,22 @@ async function runBatch(items, { apiKey, baseUrl, fetchFn = fetch, log } = {}) {
   }
 
   const data = await parseJsonBody(response);
+  if (!Array.isArray(data.results)) {
+    const error = new Error(
+      "Unexpected batch response shape: missing 'results' array"
+    );
+    error.code = "http";
+    throw error;
+  }
+  if (data.results.length !== items.length) {
+    const error = new Error(
+      `Unexpected batch response shape: expected ${items.length} results, got ${data.results.length}`
+    );
+    error.code = "http";
+    throw error;
+  }
   return {
-    results: Array.isArray(data.results) ? data.results : [],
+    results: data.results,
     count: Number(data.count) || 0,
   };
 }
