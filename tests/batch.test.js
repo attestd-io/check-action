@@ -125,6 +125,89 @@ describe("runBatch", () => {
       message: expect.stringContaining("Attestd API returned invalid JSON"),
     });
   });
+
+  it("throws when results is missing", async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => ({ count: 1 }),
+    });
+    await expect(
+      runBatch([{ product: "a", version: "1" }], {
+        apiKey: "atst_x",
+        baseUrl: "https://api.attestd.io",
+        fetchFn: fetch,
+      })
+    ).rejects.toMatchObject({
+      code: "http",
+      message: expect.stringContaining("missing 'results' array"),
+    });
+  });
+
+  it("throws when results is shorter than the request", async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        count: 1,
+        results: [
+          {
+            product: "lodash",
+            version: "4.17.21",
+            result: { supported: true, risk_state: "none" },
+          },
+        ],
+      }),
+    });
+    await expect(
+      runBatch(
+        [
+          { product: "lodash", version: "4.17.21" },
+          { product: "nginx", version: "1.20.0" },
+        ],
+        {
+          apiKey: "atst_x",
+          baseUrl: "https://api.attestd.io",
+          fetchFn: fetch,
+        }
+      )
+    ).rejects.toMatchObject({
+      code: "http",
+      message: expect.stringContaining("expected 2 results, got 1"),
+    });
+  });
+
+  it("throws when results is longer than the request", async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        count: 2,
+        results: [
+          {
+            product: "lodash",
+            version: "4.17.21",
+            result: { supported: true, risk_state: "none" },
+          },
+          {
+            product: "nginx",
+            version: "1.20.0",
+            result: { supported: true, risk_state: "none" },
+          },
+        ],
+      }),
+    });
+    await expect(
+      runBatch([{ product: "lodash", version: "4.17.21" }], {
+        apiKey: "atst_x",
+        baseUrl: "https://api.attestd.io",
+        fetchFn: fetch,
+      })
+    ).rejects.toMatchObject({
+      code: "http",
+      message: expect.stringContaining("expected 1 results, got 2"),
+    });
+  });
 });
 
 describe("evaluateItem / highestRisk", () => {
@@ -388,6 +471,44 @@ describe("runLockfileScan aggregation", () => {
     expect(fetch).not.toHaveBeenCalled();
     expect(core.setFailed).toHaveBeenCalledWith(
       expect.stringContaining("max_packages=2")
+    );
+  });
+
+  it("fails the scan when a 200 batch returns the wrong results length", async () => {
+    const core = makeCore();
+    const fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        count: 1,
+        results: [
+          {
+            product: "lodash",
+            version: "4.17.21",
+            result: { supported: true, risk_state: "none" },
+          },
+        ],
+      }),
+    });
+
+    await runLockfileScan({
+      core,
+      fetch,
+      apiKey: "atst_x",
+      baseUrl: "https://api.attestd.io",
+      lockfilePath: "requirements.txt",
+      failOn: "high",
+      maxPackages: 2000,
+      resultsFile: "out.json",
+      readFile: () => "lodash==4.17.21\nnginx==1.20.0\n",
+      writeFile: () => {},
+    });
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining("expected 2 results, got 1")
+    );
+    expect(core.setFailed).not.toHaveBeenCalledWith(
+      expect.stringContaining("missing result for item")
     );
   });
 });
