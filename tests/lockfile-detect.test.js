@@ -12,6 +12,11 @@ describe("detectParser", () => {
     expect(detectParser("package-lock.json")).toBe("package-lock");
   });
 
+  it("accepts yarn.lock and pnpm-lock.yaml", () => {
+    expect(detectParser("yarn.lock")).toBe("yarn");
+    expect(detectParser("pnpm-lock.yaml")).toBe("pnpm");
+  });
+
   it("rejects unsupported basenames", () => {
     expect(detectParser("Pipfile.lock")).toBeNull();
     expect(detectParser("package.json")).toBeNull();
@@ -22,7 +27,7 @@ describe("detectParser", () => {
 describe("parseLockfile", () => {
   it("throws a supported-formats message for unknown files", () => {
     expect(() => parseLockfile("Pipfile.lock", "{}")).toThrow(
-      /Supported: requirements\.txt \(including requirements\*\.txt and \*-requirements\.txt\) and package-lock\.json \(v2\/v3\)/
+      /yarn\.lock \(classic v1 and Berry\).*pnpm-lock\.yaml/
     );
   });
 });

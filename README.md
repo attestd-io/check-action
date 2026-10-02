@@ -46,6 +46,8 @@ By default the step fails on `high` or `critical` risk. Adjust with `fail_on`:
     path: ${{ steps.attestd.outputs.results_path }}
 ```
 
+`yarn.lock` (classic v1 and Berry) and `pnpm-lock.yaml` (lockfileVersion 5, 6, or 9) use the same lockfile input. Transitive registry packages are included. Workspace, `file:`, `link:`, `portal:`, and `patch:` locators are skipped.
+
 `requirements.txt` (pinned `==` lines only) is also supported:
 
 ```yaml
@@ -69,7 +71,7 @@ Lockfiles are chunked into `POST /v1/check/batch` calls of 100 packages. If a ba
 | `api_key` | Yes | — | Your Attestd API key (`atst_...`). Store as a [repository secret](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions). |
 | `product` | With `version` | — | Product slug to check. Mutually exclusive with `lockfile`. |
 | `version` | With `product` | — | Version string (e.g. `1.20.0`, `9.2p1`, `2.17.1`). |
-| `lockfile` | Alt mode | — | Path to a Python requirements file (`requirements.txt`, `requirements-dev.txt`, `*-requirements.txt`) or `package-lock.json` (v2/v3). Mutually exclusive with `product`/`version`. |
+| `lockfile` | Alt mode | — | Path to a Python requirements file (`requirements.txt`, `requirements-dev.txt`, `*-requirements.txt`), `package-lock.json` (v2/v3), `yarn.lock` (classic v1 or Berry), or `pnpm-lock.yaml` (5.x/6.x/9.x). Mutually exclusive with `product`/`version`. |
 | `fail_on` | No | `high` | Minimum risk state that fails the step: `critical`, `high`, `elevated`, `any`, `never`. |
 | `fail_on_provenance_missing` | No | `false` | If `true`, fail when `supply_chain.provenance` is `false` (baseline exists but this version lacks attestation). |
 | `max_packages` | No | `2000` | Lockfile safety cap. Fails before API calls if exceeded. |
@@ -181,6 +183,8 @@ Docs for this action: [attestd.io/docs/integrations/github-action](https://attes
 
 - **`requirements.txt`**: only exact `name==version` pins are checked. Ranges (`>=`, `~=`), editables (`-e`), VCS/URL lines, and `-r` includes are skipped with a warning (not silently omitted). Filenames `requirements-dev.txt`, `dev-requirements.txt`, and other `requirements*.txt` / `*-requirements.txt` names use the same parser.
 - **`package-lock.json`**: lockfileVersion 2 or 3 required. Transitive deps under `packages` are included. Workspace-local packages (`link: true` or non-`node_modules/` keys) are skipped.
+- **`yarn.lock`**: classic v1 (`# yarn lockfile v1`) and Berry (`__metadata`). Uses the resolved `version` field. Transitive registry packages are included. `workspace:`, `file:`, `link:`, `portal:`, and `patch:` locators are skipped.
+- **`pnpm-lock.yaml`**: lockfileVersion 5.x, 6.x, or 9.x. Reads the `packages` map (transitives included). Peer-suffix keys collapse to the base name@version. `file:` / `link:` / `workspace:` locators are skipped.
 - Unsupported packages warn and do not fail the step, unless a typosquat is detected (fails unless `fail_on: never`).
 - A confirmed supply-chain compromise fails the step unless `fail_on: never`.
 - The absence of Attestd coverage is not a safety signal.
