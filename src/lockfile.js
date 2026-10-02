@@ -7,6 +7,8 @@ const path = require("path");
 const { VALID_RISK_STATES, shouldFail, RISK_ORDER } = require("./lib");
 const { parseRequirementsTxt } = require("./parsers/requirements");
 const { parsePackageLock } = require("./parsers/packageLock");
+const { parseYarnLock } = require("./parsers/yarnLock");
+const { parsePnpmLock } = require("./parsers/pnpmLock");
 const { BATCH_SIZE, chunk, runBatch } = require("./batch");
 
 const RISK_EMOJI = {
@@ -25,6 +27,12 @@ function detectParser(lockfilePath) {
   if (base === "package-lock.json") {
     return "package-lock";
   }
+  if (base === "yarn.lock") {
+    return "yarn";
+  }
+  if (base === "pnpm-lock.yaml") {
+    return "pnpm";
+  }
   // Allow names like requirements-dev.txt
   if (base.startsWith("requirements") && base.endsWith(".txt")) {
     return "requirements";
@@ -37,13 +45,21 @@ function parseLockfile(lockfilePath, content) {
   if (!kind) {
     throw new Error(
       `Unsupported lockfile "${path.basename(lockfilePath)}". ` +
-        `Supported: requirements.txt (including requirements*.txt and *-requirements.txt) and package-lock.json (v2/v3).`
+        `Supported: requirements.txt (including requirements*.txt and *-requirements.txt), ` +
+        `package-lock.json (v2/v3), yarn.lock (classic v1 and Berry), ` +
+        `and pnpm-lock.yaml (lockfileVersion 5, 6, or 9).`
     );
   }
   if (kind === "requirements") {
     return { kind, ...parseRequirementsTxt(content) };
   }
-  return { kind, ...parsePackageLock(content) };
+  if (kind === "package-lock") {
+    return { kind, ...parsePackageLock(content) };
+  }
+  if (kind === "yarn") {
+    return { kind, ...parseYarnLock(content) };
+  }
+  return { kind, ...parsePnpmLock(content) };
 }
 
 /**

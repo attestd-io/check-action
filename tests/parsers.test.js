@@ -7,6 +7,8 @@ import {
   packageNameFromKey,
   parsePackageLock,
 } from "../src/parsers/packageLock.js";
+import { parseYarnLock } from "../src/parsers/yarnLock.js";
+import { parsePnpmLock, parsePnpmPackageKey } from "../src/parsers/pnpmLock.js";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 
@@ -87,5 +89,119 @@ describe("parsePackageLock", () => {
     expect(
       packageNameFromKey("node_modules/express/node_modules/debug")
     ).toBe("debug");
+  });
+});
+
+describe("parseYarnLock", () => {
+  it("parses classic v1 including transitives and scoped names", () => {
+    const content = readFileSync(join(fixtures, "yarn-classic.lock"), "utf8");
+    const { items, skipped } = parseYarnLock(content);
+    const names = items.map((i) => i.product).sort();
+    expect(names).toEqual([
+      "@types/node",
+      "accepts",
+      "debug",
+      "express",
+      "lodash",
+      "qs",
+    ]);
+    expect(items.find((i) => i.product === "lodash")?.version).toBe("4.17.21");
+    expect(items.find((i) => i.product === "@types/node")?.version).toBe(
+      "20.11.0"
+    );
+    expect(skipped).toEqual([]);
+  });
+
+  it("parses Berry, skips workspace and patch locators, ignores __metadata version", () => {
+    const content = readFileSync(join(fixtures, "yarn-berry.lock"), "utf8");
+    const { items, skipped } = parseYarnLock(content);
+    const names = items.map((i) => i.product).sort();
+    expect(names).toEqual([
+      "@types/node",
+      "accepts",
+      "debug",
+      "express",
+      "lodash",
+      "qs",
+    ]);
+    expect(items.some((i) => i.product === "local-pkg")).toBe(false);
+    expect(items.some((i) => i.product === "patched-pkg")).toBe(false);
+    expect(items.some((i) => i.version === "8")).toBe(false);
+    expect(skipped.some((s) => s.reason.includes("non-registry"))).toBe(true);
+  });
+});
+
+describe("parsePnpmLock", () => {
+  it("parses lockfileVersion 5 packages map including peer-suffix keys", () => {
+    const content = readFileSync(join(fixtures, "pnpm-lock-v5.yaml"), "utf8");
+    const { items } = parsePnpmLock(content);
+    const names = items.map((i) => i.product).sort();
+    expect(names).toEqual([
+      "@types/node",
+      "accepts",
+      "debug",
+      "express",
+      "foo",
+      "lodash",
+      "qs",
+    ]);
+    expect(items.find((i) => i.product === "foo")?.version).toBe("1.0.0");
+    expect(items.find((i) => i.product === "@types/node")?.version).toBe(
+      "20.11.0"
+    );
+  });
+
+  it("parses lockfileVersion 6 packages map including peer parentheses", () => {
+    const content = readFileSync(join(fixtures, "pnpm-lock-v6.yaml"), "utf8");
+    const { items } = parsePnpmLock(content);
+    expect(items.find((i) => i.product === "foo")?.version).toBe("1.0.0");
+    expect(items.find((i) => i.product === "express")?.version).toBe("4.18.2");
+    expect(items.map((i) => i.product).sort()).toEqual([
+      "@types/node",
+      "accepts",
+      "debug",
+      "express",
+      "foo",
+      "lodash",
+      "qs",
+    ]);
+  });
+
+  it("parses lockfileVersion 9 unprefixed packages keys", () => {
+    const content = readFileSync(join(fixtures, "pnpm-lock-v9.yaml"), "utf8");
+    const { items } = parsePnpmLock(content);
+    expect(items.find((i) => i.product === "@types/node")?.version).toBe(
+      "20.11.0"
+    );
+    expect(items.map((i) => i.product).sort()).toEqual([
+      "@types/node",
+      "accepts",
+      "debug",
+      "express",
+      "foo",
+      "lodash",
+      "qs",
+    ]);
+  });
+
+  it("rejects unsupported lockfileVersion", () => {
+    expect(() => parsePnpmLock("lockfileVersion: '7.0'\npackages: {}\n")).toThrow(
+      /Supported: 5.x, 6.x, 9.x/
+    );
+  });
+
+  it("strips v5 peer-suffix keys without treating the peer as the version", () => {
+    expect(parsePnpmPackageKey("/foo/1.0.0_bar@2.0.0")).toEqual({
+      product: "foo",
+      version: "1.0.0",
+    });
+    expect(parsePnpmPackageKey("/@scope/name/1.2.3_peer@4.5.6")).toEqual({
+      product: "@scope/name",
+      version: "1.2.3",
+    });
+    expect(parsePnpmPackageKey("/foo@1.0.0(bar@2.0.0)")).toEqual({
+      product: "foo",
+      version: "1.0.0",
+    });
   });
 });

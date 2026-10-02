@@ -26235,6 +26235,8 @@ const path = __nccwpck_require__(6928);
 const { VALID_RISK_STATES, shouldFail, RISK_ORDER } = __nccwpck_require__(1482);
 const { parseRequirementsTxt } = __nccwpck_require__(1760);
 const { parsePackageLock } = __nccwpck_require__(4341);
+const { parseYarnLock } = __nccwpck_require__(3645);
+const { parsePnpmLock } = __nccwpck_require__(2454);
 const { BATCH_SIZE, chunk, runBatch } = __nccwpck_require__(1305);
 
 const RISK_EMOJI = {
@@ -26253,6 +26255,12 @@ function detectParser(lockfilePath) {
   if (base === "package-lock.json") {
     return "package-lock";
   }
+  if (base === "yarn.lock") {
+    return "yarn";
+  }
+  if (base === "pnpm-lock.yaml") {
+    return "pnpm";
+  }
   // Allow names like requirements-dev.txt
   if (base.startsWith("requirements") && base.endsWith(".txt")) {
     return "requirements";
@@ -26265,13 +26273,21 @@ function parseLockfile(lockfilePath, content) {
   if (!kind) {
     throw new Error(
       `Unsupported lockfile "${path.basename(lockfilePath)}". ` +
-        `Supported: requirements.txt (including requirements*.txt and *-requirements.txt) and package-lock.json (v2/v3).`
+        `Supported: requirements.txt (including requirements*.txt and *-requirements.txt), ` +
+        `package-lock.json (v2/v3), yarn.lock (classic v1 and Berry), ` +
+        `and pnpm-lock.yaml (lockfileVersion 5, 6, or 9).`
     );
   }
   if (kind === "requirements") {
     return { kind, ...parseRequirementsTxt(content) };
   }
-  return { kind, ...parsePackageLock(content) };
+  if (kind === "package-lock") {
+    return { kind, ...parsePackageLock(content) };
+  }
+  if (kind === "yarn") {
+    return { kind, ...parseYarnLock(content) };
+  }
+  return { kind, ...parsePnpmLock(content) };
 }
 
 /**
@@ -26789,6 +26805,161 @@ module.exports = { parsePackageLock, packageNameFromKey };
 
 /***/ }),
 
+/***/ 2454:
+/***/ ((module) => {
+
+/**
+ * Parse pnpm-lock.yaml packages map (lockfileVersion 5.x, 6.x, 9.x).
+ *
+ * Includes transitives. Skips file/link/workspace locators. Peer-suffix keys
+ * (`(peer@1.0.0)` or `_peer@1.0.0`) collapse to the base name@version.
+ */
+
+function stripQuotes(value) {
+  const v = value.trim();
+  if (
+    (v.startsWith('"') && v.endsWith('"')) ||
+    (v.startsWith("'") && v.endsWith("'"))
+  ) {
+    return v.slice(1, -1);
+  }
+  return v;
+}
+
+function parseLockfileVersion(content) {
+  const match = content.match(/^\s*lockfileVersion:\s*['"]?([0-9.]+)['"]?/m);
+  if (!match) {
+    throw new Error("pnpm-lock.yaml is missing lockfileVersion.");
+  }
+  const raw = match[1];
+  const major = Number(raw.split(".")[0]);
+  if (![5, 6, 9].includes(major)) {
+    throw new Error(
+      `Unsupported pnpm-lock.yaml lockfileVersion ${raw}. Supported: 5.x, 6.x, 9.x.`
+    );
+  }
+  return major;
+}
+
+/**
+ * Top-level YAML map keys at indent 2 under `packages:`.
+ */
+function collectPackagesKeys(content) {
+  const lines = content.split(/\r?\n/);
+  const keys = [];
+  let inPackages = false;
+
+  for (const line of lines) {
+    if (/^\s*$/.test(line) || /^\s*#/.test(line)) continue;
+    const indent = line.match(/^ */)[0].length;
+    const trimmed = line.trim();
+
+    if (!inPackages) {
+      if (indent === 0 && (trimmed === "packages:" || trimmed.startsWith("packages:"))) {
+        inPackages = true;
+      }
+      continue;
+    }
+
+    if (indent === 0) break;
+    if (indent !== 2) continue;
+
+    const keyMatch = trimmed.match(/^('[^']+'|"[^"]+"|[^:]+)\s*:/);
+    if (!keyMatch) continue;
+    keys.push(stripQuotes(keyMatch[1]));
+  }
+
+  return keys;
+}
+
+/**
+ * Turn a pnpm packages key into { product, version } or { skip }.
+ */
+function parsePnpmPackageKey(rawKey) {
+  let key = stripQuotes(rawKey);
+  if (!key) return { skip: "could not derive package name" };
+
+  if (
+    key.includes("://") ||
+    key.includes("@file:") ||
+    key.includes("@link:") ||
+    key.includes("@workspace:")
+  ) {
+    return { skip: "non-registry locator skipped" };
+  }
+
+  if (key.startsWith("/")) key = key.slice(1);
+
+  const paren = key.indexOf("(");
+  if (paren !== -1) key = key.slice(0, paren);
+
+  let nameEnd;
+  if (key.startsWith("@")) {
+    const slash = key.indexOf("/");
+    if (slash === -1) return { skip: "could not derive package name" };
+    nameEnd = slash + 1;
+    while (nameEnd < key.length && key[nameEnd] !== "/" && key[nameEnd] !== "@") {
+      nameEnd += 1;
+    }
+  } else {
+    nameEnd = 0;
+    while (nameEnd < key.length && key[nameEnd] !== "/" && key[nameEnd] !== "@") {
+      nameEnd += 1;
+    }
+  }
+
+  if (nameEnd <= 0 || nameEnd >= key.length) {
+    return { skip: "could not derive package name" };
+  }
+
+  const product = key.slice(0, nameEnd);
+  const sep = key[nameEnd];
+  let versionPart = key.slice(nameEnd + 1);
+  if (sep !== "@" && sep !== "/") {
+    return { skip: "could not derive package name" };
+  }
+  if (versionPart.startsWith("npm:")) versionPart = versionPart.slice(4);
+  const us = versionPart.indexOf("_");
+  if (us !== -1) versionPart = versionPart.slice(0, us);
+
+  if (!product || !versionPart || versionPart === "*" || versionPart === "latest") {
+    return { skip: "missing version" };
+  }
+
+  return { product, version: versionPart };
+}
+
+function parsePnpmLock(content) {
+  parseLockfileVersion(content);
+  const keys = collectPackagesKeys(content);
+  const items = [];
+  const skipped = [];
+  const seen = new Set();
+
+  for (const key of keys) {
+    const parsed = parsePnpmPackageKey(key);
+    if (parsed.skip) {
+      skipped.push({ line: null, raw: key, reason: parsed.skip });
+      continue;
+    }
+    const dedupeKey = `${parsed.product}@${parsed.version}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    items.push({ product: parsed.product, version: parsed.version });
+  }
+
+  return { items, skipped };
+}
+
+module.exports = {
+  parsePnpmLock,
+  parsePnpmPackageKey,
+  parseLockfileVersion,
+};
+
+
+/***/ }),
+
 /***/ 1760:
 /***/ ((module) => {
 
@@ -26895,6 +27066,191 @@ function parseRequirementsTxt(content) {
 }
 
 module.exports = { parseRequirementsTxt, stripExtras };
+
+
+/***/ }),
+
+/***/ 3645:
+/***/ ((module) => {
+
+/**
+ * Parse yarn.lock (classic v1 and Berry).
+ *
+ * Uses the resolved `version` field, not the range in the descriptor.
+ * Includes transitives. Skips workspace/file/link/portal/patch locators.
+ */
+
+function stripQuotes(value) {
+  const v = value.trim();
+  if (
+    (v.startsWith('"') && v.endsWith('"')) ||
+    (v.startsWith("'") && v.endsWith("'"))
+  ) {
+    return v.slice(1, -1);
+  }
+  return v;
+}
+
+/**
+ * Split a yarn entry key into descriptors.
+ * `"@scope/pkg@^1.0.0", "@scope/pkg@^1.1.0"` or `lodash@^4.17.20, lodash@^4.17.21`.
+ */
+function splitDescriptors(rawKey) {
+  const parts = [];
+  let current = "";
+  let quote = null;
+  for (const ch of rawKey) {
+    if (!quote && (ch === '"' || ch === "'")) {
+      quote = ch;
+      continue;
+    }
+    if (quote && ch === quote) {
+      quote = null;
+      continue;
+    }
+    if (!quote && ch === ",") {
+      if (current.trim()) parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+/**
+ * Package name from a yarn descriptor (`lodash@^4.17.21`, `@scope/pkg@npm:^1.0.0`).
+ */
+function nameFromDescriptor(descriptor) {
+  const d = stripQuotes(descriptor);
+  if (d.startsWith("@")) {
+    const secondAt = d.indexOf("@", 1);
+    if (secondAt === -1) return d;
+    return d.slice(0, secondAt);
+  }
+  const at = d.indexOf("@");
+  if (at <= 0) return d;
+  return d.slice(0, at);
+}
+
+/**
+ * Protocol in the locator after the name (`npm`, `file`, `workspace`, …).
+ * Classic ranges such as `^4.17.21` have no protocol.
+ */
+function protocolFromDescriptor(descriptor) {
+  const d = stripQuotes(descriptor);
+  const at = d.startsWith("@") ? d.indexOf("@", 1) : d.indexOf("@");
+  if (at <= 0) return null;
+  const rest = d.slice(at + 1);
+  const colon = rest.indexOf(":");
+  if (colon <= 0) return null;
+  const proto = rest.slice(0, colon);
+  if (!/^[A-Za-z][A-Za-z0-9+.-]*$/.test(proto)) return null;
+  return proto.toLowerCase();
+}
+
+function isNonRegistryDescriptor(descriptor) {
+  const proto = protocolFromDescriptor(descriptor);
+  if (!proto) return false;
+  return proto !== "npm" && proto !== "registry";
+}
+
+function isEntryStart(line) {
+  if (!line || line.startsWith("#") || line.startsWith(" ") || line.startsWith("\t")) {
+    return false;
+  }
+  return line.trimEnd().endsWith(":");
+}
+
+function parseYarnLock(content) {
+  const berry = /(^|\n)__metadata\s*:/.test(content);
+  const lines = content.split(/\r?\n/);
+  const items = [];
+  const skipped = [];
+  const seen = new Set();
+
+  let keyLines = [];
+  let version = null;
+  let skippingMeta = false;
+
+  const versionRe = berry
+    ? /^\s+version:\s+["']?([^"'\s]+)["']?/
+    : /^\s+version\s+"([^"]+)"/;
+
+  function flush() {
+    if (keyLines.length === 0) return;
+    const rawKey = keyLines.join(" ").replace(/:\s*$/, "").trim();
+    const descriptors = splitDescriptors(rawKey);
+    keyLines = [];
+    const resolvedVersion = version;
+    version = null;
+
+    if (descriptors.length === 0) return;
+
+    if (descriptors.some(isNonRegistryDescriptor)) {
+      skipped.push({
+        line: null,
+        raw: rawKey,
+        reason: "non-registry locator skipped",
+      });
+      return;
+    }
+
+    if (!resolvedVersion) {
+      skipped.push({
+        line: null,
+        raw: rawKey,
+        reason: "missing version",
+      });
+      return;
+    }
+
+    const product = nameFromDescriptor(descriptors[0]);
+    if (!product) {
+      skipped.push({
+        line: null,
+        raw: rawKey,
+        reason: "could not derive package name",
+      });
+      return;
+    }
+
+    const dedupeKey = `${product}@${resolvedVersion}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    items.push({ product, version: resolvedVersion });
+  }
+
+  for (const line of lines) {
+    if (isEntryStart(line)) {
+      flush();
+      if (line.startsWith("__metadata:")) {
+        skippingMeta = true;
+        keyLines = [];
+        version = null;
+        continue;
+      }
+      skippingMeta = false;
+      keyLines = [line.trim()];
+      continue;
+    }
+    if (skippingMeta) continue;
+    if (keyLines.length === 0) continue;
+    const match = line.match(versionRe);
+    if (match) version = match[1];
+  }
+  flush();
+
+  return { items, skipped };
+}
+
+module.exports = {
+  parseYarnLock,
+  nameFromDescriptor,
+  splitDescriptors,
+  protocolFromDescriptor,
+};
 
 
 /***/ }),
