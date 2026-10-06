@@ -204,4 +204,101 @@ describe("parsePnpmLock", () => {
       version: "1.0.0",
     });
   });
+
+  it("resolves npm aliases to the installed package identity", () => {
+    expect(parsePnpmPackageKey("is-even@npm:is-odd@3.0.1")).toEqual({
+      product: "is-odd",
+      version: "3.0.1",
+    });
+    expect(parsePnpmPackageKey("/is-even@npm:is-odd@3.0.1")).toEqual({
+      product: "is-odd",
+      version: "3.0.1",
+    });
+    expect(parsePnpmPackageKey("alias@npm:@scope/pkg@1.2.3")).toEqual({
+      product: "@scope/pkg",
+      version: "1.2.3",
+    });
+    const lock = [
+      "lockfileVersion: '9.0'",
+      "packages:",
+      "  lodash@4.17.21:",
+      "    resolution: {integrity: sha512-test}",
+      "  'is-even@npm:is-odd@3.0.1':",
+      "    resolution: {integrity: sha512-test}",
+      "",
+    ].join("\n");
+    const { items } = parsePnpmLock(lock);
+    expect(items).toEqual(
+      expect.arrayContaining([
+        { product: "lodash", version: "4.17.21" },
+        { product: "is-odd", version: "3.0.1" },
+      ])
+    );
+    expect(items.some((i) => i.product === "is-even")).toBe(false);
+  });
+});
+
+describe("lockfile registry aliases", () => {
+  it("uses package-lock entry.name when the folder is an alias", () => {
+    const content = JSON.stringify({
+      name: "fixture-app",
+      lockfileVersion: 3,
+      packages: {
+        "": { name: "fixture-app", version: "1.0.0" },
+        "node_modules/lodash": { version: "4.17.21" },
+        "node_modules/is-even": {
+          name: "is-odd",
+          version: "3.0.1",
+        },
+      },
+    });
+    const { items } = parsePackageLock(content);
+    expect(items).toEqual(
+      expect.arrayContaining([
+        { product: "lodash", version: "4.17.21" },
+        { product: "is-odd", version: "3.0.1" },
+      ])
+    );
+    expect(items.some((i) => i.product === "is-even")).toBe(false);
+  });
+
+  it("uses yarn Berry resolution for npm aliases", () => {
+    const content = [
+      "__metadata:",
+      "  version: 8",
+      "",
+      '"lodash@npm:^4.17.21":',
+      "  version: 4.17.21",
+      '  resolution: "lodash@npm:4.17.21"',
+      "",
+      '"is-even@npm:is-odd@^3.0.0":',
+      "  version: 3.0.1",
+      '  resolution: "is-odd@npm:3.0.1"',
+      "",
+    ].join("\n");
+    const { items } = parseYarnLock(content);
+    expect(items).toEqual([
+      { product: "lodash", version: "4.17.21" },
+      { product: "is-odd", version: "3.0.1" },
+    ]);
+  });
+
+  it("uses yarn classic npm alias target when resolution is absent", () => {
+    const content = [
+      "# yarn lockfile v1",
+      "",
+      '"is-even@npm:is-odd@3.0.1":',
+      '  version "3.0.1"',
+      '  resolved "https://registry.yarnpkg.com/is-odd/-/is-odd-3.0.1.tgz"',
+      "",
+      'lodash@^4.17.21:',
+      '  version "4.17.21"',
+      "",
+    ].join("\n");
+    const { items } = parseYarnLock(content);
+    expect(items).toEqual([
+      { product: "is-odd", version: "3.0.1" },
+      { product: "lodash", version: "4.17.21" },
+    ]);
+  });
 });

@@ -54,7 +54,7 @@ function collectPackagesKeys(content) {
     if (indent === 0) break;
     if (indent !== 2) continue;
 
-    const keyMatch = trimmed.match(/^('[^']+'|"[^"]+"|[^:]+)\s*:/);
+    const keyMatch = trimmed.match(/^('[^']+'|"[^"]+"|.+)\s*:$/);
     if (!keyMatch) continue;
     keys.push(stripQuotes(keyMatch[1]));
   }
@@ -102,7 +102,7 @@ function parsePnpmPackageKey(rawKey) {
     return { skip: "could not derive package name" };
   }
 
-  const product = key.slice(0, nameEnd);
+  let product = key.slice(0, nameEnd);
   const sep = key[nameEnd];
   let versionPart = key.slice(nameEnd + 1);
   if (sep !== "@" && sep !== "/") {
@@ -112,11 +112,40 @@ function parsePnpmPackageKey(rawKey) {
   const us = versionPart.indexOf("_");
   if (us !== -1) versionPart = versionPart.slice(0, us);
 
+  const aliased = splitNameAtVersion(versionPart);
+  if (aliased) {
+    product = aliased.product;
+    versionPart = aliased.version;
+  }
+
   if (!product || !versionPart || versionPart === "*" || versionPart === "latest") {
     return { skip: "missing version" };
   }
 
   return { product, version: versionPart };
+}
+
+/**
+ * If spec is `name@version` (or `@scope/name@version`), the installed
+ * identity is the aliased package, not the lockfile alias key. A bare
+ * version string is not an alias.
+ */
+function splitNameAtVersion(spec) {
+  if (!spec) return null;
+  if (spec.startsWith("@")) {
+    const lastAt = spec.lastIndexOf("@");
+    if (lastAt <= 0) return null;
+    const name = spec.slice(0, lastAt);
+    const version = spec.slice(lastAt + 1);
+    if (!name || !version || name.indexOf("/") === -1) return null;
+    return { product: name, version };
+  }
+  const at = spec.indexOf("@");
+  if (at <= 0) return null;
+  const name = spec.slice(0, at);
+  const version = spec.slice(at + 1);
+  if (!name || !version) return null;
+  return { product: name, version };
 }
 
 function parsePnpmLock(content) {

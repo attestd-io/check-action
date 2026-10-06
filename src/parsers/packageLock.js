@@ -103,10 +103,15 @@ function parsePackageLock(jsonContent) {
       continue;
     }
 
-    const dedupeKey = `${product}@${version}`;
+    const resolvedName =
+      typeof entry.name === "string" && entry.name.trim()
+        ? entry.name.trim()
+        : product;
+
+    const dedupeKey = `${resolvedName}@${version}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
-    items.push({ product, version });
+    items.push({ product: resolvedName, version });
   }
 
   return { items, skipped };
