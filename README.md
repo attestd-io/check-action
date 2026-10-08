@@ -184,7 +184,7 @@ Docs for this action: [attestd.io/docs/integrations/github-action](https://attes
 - **`requirements.txt`**: only exact `name==version` pins are checked. Ranges (`>=`, `~=`), editables (`-e`), VCS/URL lines, and `-r` includes are skipped with a warning (not silently omitted). Filenames `requirements-dev.txt`, `dev-requirements.txt`, and other `requirements*.txt` / `*-requirements.txt` names use the same parser.
 - **`package-lock.json`**: lockfileVersion 2 or 3 required. Transitive deps under `packages` are included. Workspace-local packages (`link: true` or non-`node_modules/` keys) are skipped.
 - **`yarn.lock`**: classic v1 (`# yarn lockfile v1`) and Berry (`__metadata`). Uses the resolved `version` field. Transitive registry packages are included. `workspace:`, `file:`, `link:`, `portal:`, and `patch:` locators are skipped.
-- **`pnpm-lock.yaml`**: lockfileVersion 5.x, 6.x, or 9.x. Reads the `packages` map (transitives included). Peer-suffix keys collapse to the base name@version. `file:` / `link:` / `workspace:` locators are skipped.
+- **`pnpm-lock.yaml`**: lockfileVersion 5.x, 6.x, or 9.x. Reads the `packages` map (transitives included). Peer-suffix keys collapse to the base name@version. `file:` / `link:` / `workspace:` / `portal:` / `patch:` locators are skipped.
 - Unsupported packages warn and do not fail the step, unless a typosquat is detected (fails unless `fail_on: never`).
 - A confirmed supply-chain compromise fails the step unless `fail_on: never`.
 - The absence of Attestd coverage is not a safety signal.

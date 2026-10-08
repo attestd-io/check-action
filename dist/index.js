@@ -26816,8 +26816,9 @@ module.exports = { parsePackageLock, packageNameFromKey };
 /**
  * Parse pnpm-lock.yaml packages map (lockfileVersion 5.x, 6.x, 9.x).
  *
- * Includes transitives. Skips file/link/workspace locators. Peer-suffix keys
- * (`(peer@1.0.0)` or `_peer@1.0.0`) collapse to the base name@version.
+ * Includes transitives. Skips file/link/workspace/portal/patch locators.
+ * Peer-suffix keys (`(peer@1.0.0)` or `_peer@1.0.0`) collapse to the base
+ * name@version.
  */
 
 function stripQuotes(value) {
@@ -26888,7 +26889,9 @@ function parsePnpmPackageKey(rawKey) {
     key.includes("://") ||
     key.includes("@file:") ||
     key.includes("@link:") ||
-    key.includes("@workspace:")
+    key.includes("@workspace:") ||
+    key.includes("@portal:") ||
+    key.includes("@patch:")
   ) {
     return { skip: "non-registry locator skipped" };
   }

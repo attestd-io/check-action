@@ -236,6 +236,37 @@ describe("parsePnpmLock", () => {
     );
     expect(items.some((i) => i.product === "is-even")).toBe(false);
   });
+
+  it("skips portal: and patch: locators", () => {
+    expect(
+      parsePnpmPackageKey("foo@patch:foo@1.0.0#./patches/foo.patch")
+    ).toEqual({ skip: "non-registry locator skipped" });
+    expect(parsePnpmPackageKey("foo@portal:../packages/foo")).toEqual({
+      skip: "non-registry locator skipped",
+    });
+    expect(
+      parsePnpmPackageKey(
+        "@scope/foo@patch:@scope/foo@1.0.0#./patches/foo.patch"
+      )
+    ).toEqual({ skip: "non-registry locator skipped" });
+    const lock = [
+      "lockfileVersion: '9.0'",
+      "packages:",
+      "  lodash@4.17.21:",
+      "    resolution: {integrity: sha512-test}",
+      "  'foo@patch:foo@1.0.0#./patches/foo.patch':",
+      "    resolution: {integrity: sha512-test}",
+      "  'bar@portal:../packages/bar':",
+      "    resolution: {integrity: sha512-test}",
+      "",
+    ].join("\n");
+    const { items, skipped } = parsePnpmLock(lock);
+    expect(items).toEqual([{ product: "lodash", version: "4.17.21" }]);
+    expect(skipped.map((s) => s.raw)).toEqual([
+      "foo@patch:foo@1.0.0#./patches/foo.patch",
+      "bar@portal:../packages/bar",
+    ]);
+  });
 });
 
 describe("lockfile registry aliases", () => {
